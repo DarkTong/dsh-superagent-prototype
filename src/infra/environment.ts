@@ -160,8 +160,8 @@ export async function verifyEnvironment(deployment: Pick<Deployment, 'github' | 
   const { github, stateDir } = deployment
   // `-z` separates fields with NUL and never quotes paths.
   const helpers = (await runAsWorker(subprocess, ['git', 'config', '-z', '--show-origin', '--get-all', 'credential.https://github.com.helper'], stateDir, AbortSignal.any([signal, AbortSignal.timeout(60_000)])).catch(() => '')).split('\0')
-  // git prints a Windows origin with forward slashes, so both sides are compared in that form.
-  if (helpers.join('\0') !== [`file:${posixPath(workerGitConfig(stateDir))}`, credentialHelper(github.cli), ''].join('\0')) throw new SetupError('gitTooOld')
+  // git echoes the origin path exactly as GIT_CONFIG_GLOBAL spells it, backslashes included, so this side is not normalised either.
+  if (helpers.join('\0') !== [`file:${workerGitConfig(stateDir)}`, credentialHelper(github.cli), ''].join('\0')) throw new SetupError('gitTooOld')
 }
 
 /**
