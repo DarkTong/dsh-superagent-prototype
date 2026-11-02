@@ -19,6 +19,7 @@
 | `src/infra/commands.ts` | `execFile` 不能直接执行 `.cmd` | 经 `launchable` 走 PowerShell 调用运算符（`cmd /c` 会被 Node 的引号转义破坏） |
 | `src/executor/dsh.ts` | 每个 Ticket 的 prepare 命令用 `sh -c` | Windows 改用 `pwsh -NoProfile -NonInteractive -Command` |
 | `src/sources/feishu-loops.ts` | 事件消费者直接 `spawn(bot.cli)`，`.cmd` 起不来 | 同样经 `launchable` |
+| `src/app/sessions.ts` | 主 Session 的 `tools.restrict` 硬编码 `'bash'`；Windows 上 DSH 只注册 `pwsh`，`restrict` 拒绝未知工具名，**会话创建失败导致 orchestrator 起不来** | 按平台取 shell 工具名 |
 | `scripts/dsh-superagent` | `import fcntl`、`ps`、`os.kill(SIGINT)`、tmux | 全部加 Windows 分支（见下） |
 
 服务脚本的 Windows 分支：
