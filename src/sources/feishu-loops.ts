@@ -69,10 +69,12 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
 export const consumerRetry = (previous: number | undefined, ranMs: number): number =>
   previous === undefined || ranMs >= 60_000 ? 1000 : Math.min(previous * 2, 60_000)
 async function consume(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  // A `.cmd` bot CLI needs `cmd.exe` on Windows; `launchable` keeps the spawn a single process either way.
   const listener = launchable(bot(ctx).cli, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'])
+  // A `.cmd` wrapper is followed to the command it forwards to, together with the environment it sets. This consumer
+  // outlives every turn, so a console window would stay on screen; `windowsHide` is required because `spawn` does not
+  // hide it by default, unlike `execFile`.
   const child = spawn(listener.program, listener.args,
-    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, ...listener.env, LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1',
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
   const stdout = createInterface({ input: child.stdout }); const stderr = createInterface({ input: child.stderr })
   let chain = Promise.resolve(); let diagnostic = ''; let ready = false

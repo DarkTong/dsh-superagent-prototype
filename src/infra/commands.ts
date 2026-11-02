@@ -68,10 +68,11 @@ export class Commands {
   withSignal(signal?: AbortSignal): Commands { return signal ? new Commands(this.resolved, this.environment, AbortSignal.any([this.signal, signal])) : this }
   async run(program: string, args: string[], cwd?: string): Promise<string> {
     try {
-      // A `.cmd` wrapper cannot be executed directly on Windows; `launchable` routes it through `cmd.exe`.
+      // A `.cmd` wrapper is followed to the command it forwards to, so a JSON argument keeps its quotes. `windowsHide`
+      // keeps any shell's console off screen (execFile defaults it to true, stated here so it survives a default change).
       const target = launchable(program, args)
-      const { stdout } = await exec(target.program, target.args, { cwd, signal: this.signal, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, ...this.environment, GH_PROMPT_DISABLED: '1', LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
+      const { stdout } = await exec(target.program, target.args, { cwd, signal: this.signal, timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+        env: { ...process.env, ...target.env, ...this.environment, GH_PROMPT_DISABLED: '1', LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' } })
       return stdout
     } catch (error) { throw commandError(error, program) }
   }

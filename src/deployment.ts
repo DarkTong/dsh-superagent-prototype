@@ -79,9 +79,10 @@ export type Probe = (argv: string[], env?: Record<string, string>) => Promise<st
 export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd: string, signal: AbortSignal): Probe {
   const path = withoutDirectory(process.env.PATH ?? '', workerBin(stateDir))
   return (argv, env) => {
-    // Batch files need `cmd.exe` on Windows; `PATH` travels as a layered variable rather than an `env` prefix, which Windows has no binary for.
-    const { program, args } = launchable(argv[0]!, argv.slice(1))
-    return runAsWorker(subprocess, [program, ...args], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]), { ...env, PATH: path })
+    // A wrapper `.cmd` is followed to the command it forwards to; `PATH` travels as a layered variable rather than an
+    // `env` prefix, which Windows has no binary for.
+    const { program, args, env: fromWrapper } = launchable(argv[0]!, argv.slice(1))
+    return runAsWorker(subprocess, [program, ...args], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]), { ...fromWrapper, ...env, PATH: path })
   }
 }
 
