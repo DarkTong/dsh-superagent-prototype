@@ -20,6 +20,10 @@
 | `src/executor/dsh.ts` | 每个 Ticket 的 prepare 命令用 `sh -c` | Windows 改用 `pwsh -NoProfile -NonInteractive -Command` |
 | `src/sources/feishu-loops.ts` | 事件消费者直接 `spawn(bot.cli)`，`.cmd` 起不来 | 同样经 `launchable` |
 | `src/app/sessions.ts` | 主 Session 的 `tools.restrict` 硬编码 `'bash'`；Windows 上 DSH 只注册 `pwsh`，`restrict` 拒绝未知工具名，**会话创建失败导致 orchestrator 起不来** | 按平台取 shell 工具名 |
+| `src/sources/feishu-loops.ts` | `spawn` 默认不隐藏控制台窗口，长驻的飞书事件消费者会在桌面留一个一直开着的窗口 | `windowsHide: true` |
+| `src/infra/platform.ts` | 参数里的 JSON 经 `cmd.exe` 重新解析，双引号被吃掉（飞书读历史消息全部报 `--params invalid format`） | 解析包裹脚本，直接调用它转发的真实程序，不走 `cmd` |
+| `src/infra/platform.ts` | 绕开包裹脚本会丢掉它 `set` 的环境变量（bot CLI 退回个人配置，`strict mode off`） | 把 `set` 字面量一起提取成环境变量传下去 |
+| `src/infra/platform.ts` | 兜底的 shell 包装用 `-Command` 传命令，引号仍会被 Node 转义破坏 | 改用 `-EncodedCommand`（UTF-16LE base64） |
 | `scripts/dsh-superagent` | `import fcntl`、`ps`、`os.kill(SIGINT)`、tmux | 全部加 Windows 分支（见下） |
 
 服务脚本的 Windows 分支：
