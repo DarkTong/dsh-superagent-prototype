@@ -7,6 +7,7 @@ Use this guide to install, configure and operate dsh-superagent. It covers accou
 - **A dedicated DeepSeek Harness profile**, called `superagent` in this guide. Create it from the Web profile template. It loads the bundle and serves its panel on `127.0.0.1`. Keep it separate from the profile you work in: the plugin changes process-wide `PATH` and git settings, and its process needs independent restarts and upgrades.
 - **An agent GitHub account.** The agent comments, pushes branches and opens pull requests as this account, through a GitHub CLI signed in only as that account.
 - **Optional:** a Feishu bot for chat requests.
+- **Optional:** an agent 工蜂 account for issues and merge requests on `git.woa.com`.
 
 Plugin configuration holds the state directory and machine limits. Use the panel for everything else: Sources for the repository and accounts, Policy for allowed lists, and Execution for worker directories and commands.
 
@@ -25,6 +26,7 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
 - A repository on github.com; GitHub Enterprise Server is not supported. To create a checkout per Ticket, keep a local clone from which the prepare command can add worktrees. Install `git-lfs` if that repository uses Git LFS.
 - A model provider configured for DeepSeek Harness. dsh-superagent uses the profile's default model unless the Eval or Execution settings name another.
 - For Feishu: `lark-cli` (tested with 1.0.90) and a Feishu or Lark app with a bot
+- For 工蜂: a one-time browser sign-in to the MCP gateway, and a wrapper that calls its tools with the OAuth token it stores
 
 ## Accounts
 
@@ -67,6 +69,66 @@ Both presets run with `danger-full-access` as the operator's OS user and read me
    The host refuses a CLI that can act as a user. It reads the app id, Feishu/Lark brand and bot `open_id` from the bot configuration.
 
    Both configurations share the keychain entry for the app secret. To remove only the bot configuration, delete its directory; do not run `lark-cli config remove`, which would affect the shared secret.
+
+### 工蜂 account (optional)
+
+工蜂 is reached through its **official MCP gateway**, `https://mcpgw.knot.woa.com/gongfeng`, not through `/api/v3`. This is not a preference: 工蜂's Account page states that a personal token is for plain OpenAPI use only and must not be given to an AI agent, and directs AI use to the Knot MCP Marketplace. A project access token does not exist, and a group access token needs a group the account belongs to, so the MCP is the supported path.
+
+The gateway is reached with an OAuth bearer token. Create it once with a browser sign-in:
+
+1. Run the bundled bootstrap, which registers a PKCE client and prints an authorize link:
+
+   ```sh
+   python ~/.dsh/gongfeng-mcp/gongfeng_mcp_oauth_bootstrap.py
+   ```
+
+2. Open the link, finish the internal SSO sign-in. The redirect lands on `127.0.0.1:38207`, and the script writes `~/.dsh/gongfeng-mcp/gongfeng_mcp_token.json`.
+
+   The link must be the one the script prints. The gateway's own `mcpgw.knot.woa.com/authorize` goes through an `auth/guide` page that re-issues the request with a marketplace client id, which a dynamically registered client is not, and fails with `invalid_client`. The script therefore authorizes against `iam.it.woa.com/oauth2/authorize` directly.
+
+3. Point the Source's `cli` at the bundled wrapper, which reads the token from its own file:
+
+   ```sh
+   # ~/.dsh/gongfeng-mcp/gongfeng-mcp.cmd (Windows) or gongfeng-mcp (POSIX)
+   python <path>/gongfeng_mcp_cli.py %*
+   ```
+
+The wrapper's contract is `gongfeng-mcp call <tool> <json>`, printing the tool's JSON. The host probes `get_current_user` and then `get_project_detail` for each configured project; those two calls are exactly what setup checks.
+
+A Windows wrapper must forward to a program the caller can follow: write the interpreter's `.exe` path, not `python` and not `%~dp0…`. dsh-superagent follows a `.cmd` to the program it forwards to so that `cmd.exe` never re-tokenizes the arguments, which would strip the double quotes out of a JSON argument.
+
+### 工蜂 tokens and rotation
+
+The OAuth token cannot be minted headlessly: no device-code flow exists, and every path sits behind the internal SSO. Treat the first authorization as a one-time step a person performs.
+
+`access_token` lasts 7 days and `refresh_token` 30 days. The wrapper refreshes on its own when the access token has under an hour left, so rotation needs no restart. If the refresh token lapses (more than 30 days unused), re-run the bootstrap. `gongfeng_mcp_refresh.py --check` reports the remaining lifetime.
+
+dsh-superagent does not receive 工蜂 webhooks. The Source polls, so a request is seen within one polling interval (a minute by default). The MCP exposes no notification feed and no `updated_after` filter, so the Source reads each project's issues and merge requests newest-first and compares their `updated_at` against its cursor; only items updated since the cursor are taken in. Comments are read per item, with the comment tools taking each item's internal id rather than its iid. CI comes from `get_commit_combined_status`, which answers `{"message": "404 commit check data not found"}` for a ref with no checks — a state that means "no CI", never "passed".
+
+### A shared or dedicated 工蜂 account
+
+Prefer a dedicated account when the organization can provision one. A group access token, which provisions a bot user in its project group, is the intended shape; otherwise any second account works. This deployment currently has no such account, so the configured account may be one a person also uses.
+
+The Source distinguishes writing rather than treating that whole login as a bot. Every agent comment begins with `This is by an automated agent, not a human.` and ends with an invisible `<!-- dsh-superagent:… -->` marker; an issue or merge request the agent opens begins with the disclosure. A person's comment on the shared account has neither and remains a human Trigger. Do not add that shared login to the bot list to bypass the person policy.
+
+This convention distinguishes the deployment's own writes; it is not proof that text from another account is trustworthy. The ordinary allowed and bot lists still decide authority. An agent's own comments are not read back as requests.
+
+### What the agent accepts
+
+With `eval.mode: auto`, an assessment accepts a request only when an enabled Policy rule covers it **and** names an operation that already has an objective target. The two default rules are narrow on purpose:
+
+- `copy` — correcting a typo, wording, punctuation or existing translation. The text being corrected must already exist.
+- `visual` — local spacing, alignment, overflow or styling, with a specified target or an objectively established existing state.
+
+A request that creates something new ("add a file", "add a feature") matches neither, and the candidate is ignored — which is correct, not a bug. To verify the whole path end to end, file a request the `copy` rule covers: seed a real typo on the branch the agent clones, then ask it to fix that typo.
+
+`~/.dsh/gongfeng-mcp/new_typo_task.py` files such a request and prints the created issue; passing its iid to the same script prints the agent's reply. The verification run on `shiyugguo/PerfPlatform` produced: the Source polling the issue, an `accept` Decision quoting the rule, a ticket whose worker edited `ARCHITECTURE.md` (`架够` → `架构`) and committed `docs: fix typo in ARCHITECTURE.md title`, the branch pushed to 工蜂, and a 工蜂 comment reporting that same file, diff and commit hash.
+
+`new_e2e_issue.py` takes the same shape against a running instance. It assigns with `assignee_users`, which is the only field that works: `assignee_ids` and `assignee_id` are accepted and ignored, so the issue arrives unassigned and the poll correctly skips it, because an issue the agent opened itself with nothing addressing it is not a request.
+
+A second run on `shiyugguo/PerfPlatform` exercised both outcomes. Asked to add a line to a root `README.md`, the worker found no such file on any branch and **dropped** the ticket, replying that the file and the `pnpm test` command it was told to document do not exist — dropping is the correct answer when the request has no valid target, and the documentation is not fabricated to satisfy it. Asked next to create that `README.md` from given text, the worker committed it on `agent/<ticket name>`, opened merge request !18, and replied on the issue with the commit; because the ticket follows that merge request, it stayed open with `follows: [{ thread: "gongfeng:<project>:mr:18", own: true }]` until the merge request closed, then ended by itself with `outcome: closed`. A ticket is therefore done with its merge request, not merely with its commit.
+
+Two settings decide whether the worker can reach a repository at all. `executor.directory` is the root each ticket's directory is created under, and `executor.prepare` runs in **that root**, not in the ticket's directory, so it must create the directory itself — `git clone … "$env:DSH_SUPERAGENT_DIR"` on Windows, where the shell is PowerShell and the ticket variables need its `$env:` form.
 
 ## Install
 
@@ -154,7 +216,7 @@ Setup must succeed before polling or work starts. Overview lists missing require
    ```
 
    List personal CLIs, such as one signed in to your own account, as blocked commands.
-4. **Prompts.** Set the team sections: the GitHub disclosure line, review bots, the commit author and the auto-merge condition.
+4. **Prompts.** Set the team sections: the GitHub and shared 工蜂 account disclosure lines, review bots, the commit author and the auto-merge condition. 工蜂 uses `gongfeng-mcp` itself when its immediate-merge conditions hold, not a separate merge CLI. Source schemas fill new switches such as `observeReviews` when an older saved configuration omits them; no extra save is needed for that alone.
 
 ### Management API
 
@@ -168,7 +230,7 @@ Agents may rely on these routes and fields. The other routes in `src/app/api.ts`
 
 | Request | Answer |
 | --- | --- |
-| `GET state` | What every page reads: `setup`, with `problem` and `feishuProblem`, each `null` or a setup problem with `place`, `code`, `values` and `detail`, and `accounts` once setup resolved them; `health`, an entry per part, below, with `state` (`starting`, `ready`, `paused` or `error`), `detail` and `at`; `load`, the Executor Sessions `running`, the Tickets `queued` and `maxWorkers`; `paused`; and `masterId` |
+| `GET state` | What every page reads: `setup`, with `problem`, `feishuProblem` and `gongfengProblem`, each `null` or a setup problem with `place`, `code`, `values` and `detail`, and `accounts` once setup resolved them; `health`, an entry per part, below, with `state` (`starting`, `ready`, `paused` or `error`), `detail` and `at`; `load`, the Executor Sessions `running`, the Tickets `queued` and `maxWorkers`; `paused`; and `masterId` |
 | `GET settings` | `blocks`: `policy`, `eval` and `executor`, each with its `value` and its `revision`; `sources`: the Source instances, each with `id`, `kind`, `installed`, its block's `value`, `{"enabled": …, "config": {…}}`, and `revision`, its kind's form, and its setup `problem` when it has one; `policyVersion`; and `environment`, the execution environment's `root` and `variables` |
 | `GET sources` | Each Source's status: `state` (`missing`, `off`, `error`, `setup`, `starting`, `paused` or `ready`), the `health` of its parts, its setup `problem`, the last day's `stats`, the Triggers it `filtered` in that day, and the messages it `dropped` in that day, newest drop first, each with its `channel`, `preview`, `ticket` (`id` and `title`) when it was for one, its `thread` when the store has it, and `dropped.at` and `dropped.reason`, `channelGone` or `channelIgnored` |
 | `PUT settings/<block>` with `{"value": …, "revision": n}` | Saves one block: `saved`, the block's new `revision`, `policy_changed` and `restarting`. `value` is the whole block, as `GET settings` holds it; a missing key takes its default |
@@ -187,7 +249,7 @@ Health entries are grouped by responsibility:
 | `evals` | Unavailable Evals from the last hour with no later judgement or dismissal |
 | `assessment`, `launch`, `delivery`, `relay`, `notice`, `reply` | Stored work described in [003 Execution](003-execution.md); delivery counts waiting work, while reply covers Channel messages |
 | `worker` | Executor Session event handling; appears after its first failure |
-| `github`, `feishu`, `history` | Source polling, events and history recovery |
+| `github`, `feishu`, `history`, `gongfeng` | Source polling, events, history recovery and 工蜂 projects |
 | `sync:<source id>` | Allowed-list synchronization |
 
 A refusal has a status and `error`, its English text:
@@ -199,8 +261,8 @@ A refusal has a status and `error`, its English text:
 
 The blocks:
 
-- `source:github`, `source:feishu`: `{"enabled": true, "config": {…}}`. GitHub's config has `repository` and `cli`, and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`.
-- `policy`: `{"rules": […], "sources": {"github": {"allowed": [{"id": "<login>"}], "bots": [{"id": "dependabot[bot]"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, and by `issues`, `pulls`, `comments` or `ci` for GitHub; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
+- `source:github`, `source:feishu`, `source:gongfeng`: `{"enabled": true, "config": {…}}`. GitHub's config has `repository` and `cli`, and the switches `observeIssues`, `observePulls`, `observeComments` and `observeCi`, off by default, which receive every new Issue, new pull request and comment in the repository and the default branch's CI; Feishu's has `cli`, `chats` as `[{"chatId": "oc_…", "name": "…", "listen": "mentions"}]` (or `"all"`), `directMessages`, and `otherChats` as `"none"` or `"mentions"`; 工蜂's has `cli`, `projects` as `[{"path": "group/project", "listen": "addressed"}]` (or `"all"`), the switches `observeNotes`, `observeReviews` and `observeCi`, and `pollSeconds`.
+- `policy`: `{"rules": […], "sources": {"github": {"allowed": [{"id": "<login>"}], "bots": [{"id": "dependabot[bot]"}]}, "feishu": {"allowed": [{"id": "ou_…", "name": "…"}], "syncChat": "oc_…", "admission": {"oc_…": {"unlistedAddressed": "explicit"}}}}}`. `bots` lists the bots whose messages may become inferred candidates. An `admission` row is keyed by chat id, `other` or `direct` for Feishu, and by `issues`, `pulls`, `comments`, `reviews` or `ci` for GitHub and 工蜂 as applicable; 工蜂's `reviews` row is fixed to ignore because AI findings are context on an existing Ticket; an unset cell takes its default (see [002 Authorization](002-authorization.md)).
 - `eval`: `mode`, `timeoutSeconds` and `model`.
 - `executor`: `model`, `maxWorkers`, `directory`, `prepare` and `blockedCommands`. The processing pause is a setting of its own, `paused`, which `POST executor/pause` sets.
 

@@ -3,6 +3,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { UserError, key, latestReport, reached, runningAssignment, threadKey, type Ticket, type Trigger } from '../core/index.ts'
 import { batchOf, inputMessage, triggerMessage, workerSessionId } from '../executor/dsh.ts'
 import { readGithub } from '../sources/github-read.ts'
+import { readGongfengResource } from '../sources/gongfeng-read.ts'
 import { feishuReferences, feishuRead } from '../sources/feishu-read.ts'
 import { feishuRef } from '../sources/feishu.ts'
 import { feishuTriggerId } from '../sources/feishu-trigger.ts'
@@ -52,6 +53,12 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'models/<provider>', holds: 'one provider\'s models' },
   { name: 'feishu/<trigger-id>/…', holds: 'a Feishu original, as the dsh-superagent-feishu skill describes', executor: true },
   { name: 'github/…', holds: 'a GitHub original, as the dsh-superagent-github skill describes', executor: true },
+  { name: 'gongfeng/<trigger-id>/<thread|root|parent>', holds: 'the 工蜂 conversation of a Trigger, by page, as the dsh-superagent-gongfeng skill describes', executor: true },
+  { name: 'gongfeng/issue/<iid>', holds: 'one 工蜂 issue with its comments by page', executor: true },
+  { name: 'gongfeng/mr/<iid>', holds: 'one 工蜂 merge request with its combined commit status and its comments by page', executor: true },
+  { name: 'gongfeng/mr/<iid>/comments/<page>', holds: 'one page of that merge request\'s comments', executor: true },
+  { name: 'gongfeng/mr/<iid>/review', holds: 'the latest completed AI review of that merge request; absence or no findings is not approval', executor: true },
+  { name: 'gongfeng/issue/<iid>/comments/<page>', holds: 'one page of that issue\'s comments', executor: true },
 ]
 export const resourceGrammar = (executor: boolean): string => RESOURCES.filter(resource => !executor || resource.executor)
   .map(resource => `${resource.name}: ${resource.holds}`).join('; ')
@@ -67,6 +74,8 @@ export interface ResourceHost {
   /** Whether a Session may read `revision` (the revision it currently runs under or any revision it ran under previously). */
   mayRead(sessionId: string, revision: number): boolean
   feishuPageSize(): number
+  /** A Trigger's Source context reader, which `gongfeng/…` reads use for its conversation. */
+  threadContext(trigger: Trigger): { read(commands: Commands, part: 'thread' | 'root' | 'parent', cursor?: string): Promise<{ messages: unknown[]; next?: string }> } | undefined
   sourceLink(trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }>
 }
 export interface MainResourceHost extends ResourceHost {
@@ -104,9 +113,20 @@ const trigger = (host: ResourceHost, id: string, ticketId?: string): Trigger => 
 async function sourcePage(read: Read, source: string, fetch: () => Promise<unknown>) {
   const { host, resource, offset, sessionId } = read
   const body = offset === 0 ? JSON.stringify(await fetch()) : host.pages.get(`${sessionId}:${resource}`)
-  if (body === undefined) throw new Error(`Read this ${source === 'feishu' ? 'Feishu' : 'GitHub'} resource from offset 0 first`)
+  const named = source === 'feishu' ? 'Feishu' : source === 'gongfeng' ? '工蜂' : 'GitHub'
+  if (body === undefined) throw new Error(`Read this ${named} resource from offset 0 first`)
   if (offset === 0) host.pages.set(`${sessionId}:${resource}`, body)
   return text(read, body)
+}
+/** The 工蜂 project a resource read acts on: the Trigger's own project for a Trigger path, else the one configured project. */
+function gongfengProjectOf(host: ResourceHost, trigger?: Trigger) {
+  const configured = host.commands.deployment.gongfeng?.projects ?? []
+  if (trigger?.source === 'gongfeng') {
+    const path = String(trigger.meta.project ?? ''), id = Number(trigger.meta.projectId)
+    if (path && id) return { path, id }
+  }
+  if (configured.length === 1) return configured[0]!
+  throw new Error(`Reading 工蜂 context needs the Trigger's project or exactly one configured project; ${configured.length} are configured`)
 }
 const THREAD_DECISIONS = 5
 const triggerLine = (trigger: Trigger) => ({ trigger_id: trigger.id, actor: trigger.actor.id, human: trigger.human, at: trigger.at,
@@ -207,6 +227,27 @@ const ROUTES: readonly Route[] = [
     return sourcePage(read, 'feishu', () => feishuRead(commands, ref, read.resource, read.host.feishuPageSize()))
   }],
   ['github/', read => sourcePage(read, 'github', () => readGithub(read.host.commands.withSignal(read.signal), read.resource))],
+  ['gongfeng/', async read => {
+    const parts = read.resource.split('/')
+    // `<trigger-id>/<thread|root|parent>` reads the Trigger's own conversation; anything else names an item in a project.
+    const section = /^(thread|root|parent)$/.test(parts[1] ?? '')
+    if (section) {
+      const source = trigger(read.host, parts[0]!, read.ticketId)
+      const context = read.host.threadContext(source)
+      if (!context) throw new Error('A 工蜂 Trigger is required')
+      const project = gongfengProjectOf(read.host, source)
+      const part = parts[1] as 'thread' | 'root' | 'parent'
+      const cursor = read.offset === 0 ? undefined : String(read.offset)
+      return sourcePage(read, 'gongfeng', async () => {
+        const body = await context.read(read.host.commands.withSignal(read.signal), part, cursor)
+        const next = read.offset === 0 ? 0 : read.offset
+        return { ...body, project, ...(body.next ? { next_offset: next + 1 } : {}) }
+      })
+    }
+    const origin = /^(?:issue|mr)\//.test(read.rest) ? undefined : trigger(read.host, parts[0]!, read.ticketId)
+    const project = gongfengProjectOf(read.host, origin)
+    return sourcePage(read, 'gongfeng', () => readGongfengResource(read.host.commands.withSignal(read.signal), project, read.rest))
+  }],
   ['trigger/', async read => {
     const { host, rest, ticketId, offset, signal } = read
     if (!rest || rest.includes('/')) throw new Error('Unknown context resource')

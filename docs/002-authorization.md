@@ -8,12 +8,20 @@ The host enforces allowed lists, rules and Mandates. Messages, comments and quot
 
 ### Eval: deciding whether to start work
 
-The Source records whether a message addresses the agent: `mention` for a mention of the bot or agent account, and `direct` for a direct message. The gate checks the sender and the Source's Policy:
+The Source records whether a message addresses the agent: `mention` for a mention of the bot or agent account, and `direct` for a direct message. 工蜂 has no direct messages, so it records an assignment or a mention as `mention`, keeping which one it was in the Trigger's `meta.via`. The gate checks the sender and the Source's Policy:
 
 - An allowed person who addresses the agent makes an explicit request.
 - A person's follow-up on a Thread with Tickets follows the rules below.
 - Other human messages use the admission table for their receiving scope.
 - A bot on the Source's bot list can produce an inferred candidate, never an explicit request. Other bots are not admitted.
+
+### Telling the agent's writing from the account it shares
+
+A 工蜂 deployment may have no bot account of its own, so the agent comments and opens merge requests as a person's login. The login therefore cannot decide whose writing a message is, and judging by it would treat that person's own comments as the agent's and drop them.
+
+What decides is what the agent always writes: every comment it posts opens with `This is by an automated agent, not a human.` and ends with an invisible `<!-- dsh-superagent:… -->` marker, and it puts the same sentence at the top of every issue and merge request description it writes. A message carrying no marker and no leading sentence is that person's, including when its login is the account's own.
+
+AI code review on 工蜂 is a service, not an account: its findings carry no sender and never make a request. They are read only for merge requests an open Ticket follows and reach that Ticket through Subscription fan-out as automatic Inputs. Their admission row is fixed to ignore: it documents that they cannot originate a new Ticket or resume an ended one, and no setting turns them into work candidates.
 
 ### Subscriptions: continuing existing work
 
@@ -59,8 +67,9 @@ Each Source's Policy has an admission table. Its rows are receiving scopes:
 
 - **Feishu:** each configured chat, other chats the bot receives mentions from, and direct messages. Other chats are received only when **其他群** is set to **仅 @** on the Feishu card.
 - **GitHub:** new Issues, new pull requests, comments and the default branch's CI.
+- **工蜂:** each configured project, with its comments and their CI. A row is available for unaddressed messages only where the project is set to receive everything. AI code review's row is fixed to ignore: it is context for merge requests an open Ticket already follows, never a new work candidate.
 
-A row has up to three cells. Each cell decides whether a message becomes an explicit request, an inferred candidate or nothing:
+A row has three cells. Each cell decides whether a message becomes an explicit request, an inferred candidate or nothing:
 
 | Cell | Choices | Default |
 | --- | --- | --- |

@@ -66,6 +66,7 @@ Say that you requested someone's review only after the request is confirmed.
 A material limitation belongs in a separate short sentence only when it changes what the user can use or do; otherwise keep it in the PR.
 
 Begin every message posted on GitHub, including comments, review replies and PR descriptions, with this line: This is by an automated agent, not a human.
+Write it atop each 工蜂 issue or MR you open; its channel adds it to comments, telling your writing from the account's person so their comments still arrive.
 IM messages do not carry it: the bot account already identifies itself.
 
 Choose review communication by outcome, equally for human and bot authors.
@@ -89,6 +90,7 @@ Critical findings are usually valid and deserve prompt investigation, but verify
 Reject advice that adds unnecessary complexity, duplicates existing behavior or degrades the codebase.
 Do not chase bot approval, acknowledge every bot comment, or repeat an unchanged disposition.
 The thread-explanation rule applies to findings assessed within the allowed rounds; later bot runs do not authorize another review cycle.
+工蜂 AI findings use review tools, never ordinary note ids. Empty or unfinished review is not human approval.
 Address at most three review rounds per PR from each automated reviewer, across workers, restarts and follow-up tickets; a round is one distinct bot review run whose findings are assessed together, not each inline comment or duplicate delivery.
 Before starting a round, inspect retained ticket reports and PR review history; record the bot run/version identifier, round count and disposition in orchestrator_report so the next worker can continue the count.
 After the third round, do not request another bot review or wake a worker solely to address further bot feedback.

@@ -87,7 +87,15 @@ By default, the Executor never enables auto-merge as the agent account: GitHub a
 
 The default instructions allow auto-merge only for a pull request opened for the Ticket, when it is ready, the required approvals cover the head commit, and additions plus deletions total fewer than 200 lines. Before pushing another revision, the Executor withdraws auto-merge.
 
+工蜂 has no auto-merge: `merge_merge_request` merges immediately through the configured `gongfeng-mcp` account. An Executor calls it only when the Delivery requirements' readiness, size and approval conditions hold, and uses the merge request's internal `id`, not its `iid`. There is no separate merge account or CLI. A person's hold or an approval that does not cover the current head prevents the call.
+
 Reviews without a body, such as approvals, also arrive as Triggers and can wake an Executor waiting for review. These instructions govern the agent, not GitHub's merge rules. To enforce approvals, require them in branch protection and dismiss stale approvals. Omit the merge CLI or remove the auto-merge paragraph to require manual merging.
+
+### AI code review
+
+工蜂's AI code review is a service, not an account: it reports findings beside a merge request's comments rather than among them, so the Source reads it separately (`get_review_intelligent_result`) and reports each new finding as an automatic Input to the open Ticket following that merge request. A finding grants no authority and never becomes a person's request. A `ready` Ticket with an open merge request remains open and receives it; an ended or stopped Ticket does not resume.
+
+Only a completed (`SUCCESS`) review is a snapshot. A project whose review has not finished or was never enabled has no current findings; neither that nor an empty result is an approval. The Source keeps the review id, patch set and head with its reported finding keys. A repeated poll says nothing again, an edited finding arrives again, and a new patch or head replaces the previous pending set rather than leaving old findings on the current revision. AI finding ids are not ordinary MR note ids: `gongfeng/mr/<iid>/review` rereads the structured review, and replies use review APIs rather than the MR note channel.
 
 ## How a Ticket ends
 

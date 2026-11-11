@@ -55,4 +55,15 @@ export const KV = {
   feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
     topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
+  /**
+   * 工蜂 Source: each configured project resolved to its id (so a rename keeps stored Threads); the upload-time cursor of the
+   * issue and merge request streams; the last read cursor of each subscribed item; and each merge request's CI fingerprint and
+   * revision, whose count makes every reported CI change a distinct Trigger id.
+   */
+  gongfeng: { projects: record<Record<string, string>>('gongfeng-projects'),
+    since: record<string>('gongfeng-since'),
+    cursor: family<string, [thread: string]>('gongfeng-cursor:'),
+    ci: family<{ fingerprint: string; revision: number }, [thread: string]>('gongfeng-ci:'),
+    /** Each merge request's reported AI findings, its last completed patch/head, and the number of reported findings. */
+    review: family<{ seen: string[]; revision: number; reviewId?: number; patchSet?: number; head?: string }, [thread: string]>('gongfeng-review:') },
 }

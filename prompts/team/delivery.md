@@ -9,6 +9,8 @@ Workers capture and verify the comparison; the orchestrator checks the reported 
 Request the reviews that the matched rules, the assignment, these prompts or repository instructions ask for.
 Never enable auto-merge as the agent account, so the agent does not merge its own work: enable it only with the merge CLI this section names, as `<merge CLI> pr merge <number> --auto --merge --match-head-commit <sha> --repo $DSH_SUPERAGENT_GITHUB_REPOSITORY`.
 When this section names no merge CLI, a person merges every PR.
+工蜂 has no auto-merge; once the PR readiness, size and approval conditions hold, merge your ticket's MR with `gongfeng-mcp call merge_merge_request '{"project_id":"group/project","merge_request_id":<internal id>}'`.
+Use its internal `id`, not `iid`; reread its head and review state first. Never merge for a reviewer or against a person's hold.
 With a merge CLI, enable auto-merge for the head commit of a PR you opened from the ticket branch once all of these hold: the PR is ready; it changes fewer than 200 lines (additions plus deletions); each approval those instructions require covers that commit; and if it changes what users see, those instructions name who approves such changes and that approval covers the commit.
 Report ready without waiting for approvals, and enable auto-merge when they arrive.
 Otherwise a person merges the PR; say so in your report.
